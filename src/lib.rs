@@ -77,6 +77,7 @@ impl StackBuilder {
         Sender<Vec<u8>>,
     ) {
         let (stack_tx, stack_rx) = channel(self.stack_buffer_size);
+        // TODO: make it an Option, like udp_tx and udp_rx
         let (udp_writeback_tx, udp_writeback_rx) = channel(self.stack_buffer_size);
 
         let (udp_tx, udp_rx) = if self.enable_udp {
@@ -154,6 +155,7 @@ impl SystemStack {
         stack
     }
 
+    // TODO: impl Stream for SystemStack to avoid the ugly loop
     pub fn process_loop<W: Sink<Vec<u8>> + Send + Sync + Unpin + 'static>(
         mut self,
         mut tun_sink: W,
@@ -196,6 +198,7 @@ impl SystemStack {
         })
     }
 
+    // TODO: remove self
     /// return if the packet should be written back to tun
     async fn process_ip(&self, buf: &mut [u8]) -> Result<bool> {
         let ip_version = (buf[0] >> 4) & 0x0f;
