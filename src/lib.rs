@@ -4,11 +4,13 @@ mod checksum;
 mod error;
 mod nat;
 mod packet;
+mod tcp;
 mod udp;
 
 use checksum::UpdateCsum;
 pub use error::StackError;
 pub use nat::*;
+pub use tcp::TcpListener;
 pub use udp::UdpSocket;
 pub type Result<T> = std::result::Result<T, StackError>;
 
@@ -19,7 +21,6 @@ use std::{
     sync::Arc,
 };
 use tokio::{
-    net::TcpListener,
     sync::mpsc::{Receiver, Sender, channel},
     task::JoinHandle,
 };
@@ -72,7 +73,7 @@ impl StackBuilder {
         self,
     ) -> (
         SystemStack,
-        Option<TcpListener>,
+        Option<crate::TcpListener>,
         Option<UdpSocket>,
         Sender<Vec<u8>>,
     ) {
@@ -88,7 +89,9 @@ impl StackBuilder {
         };
 
         let tcp_listener = if self.enable_tcp {
-            TcpListener::bind((self.inet4_server_addr, 0)).await.ok()
+            tokio::net::TcpListener::bind((self.inet4_server_addr, 0))
+                .await
+                .ok()
         } else {
             None
         };
@@ -108,6 +111,8 @@ impl StackBuilder {
         .await;
 
         let udp_socket = udp_rx.map(|rx| UdpSocket::new(rx, udp_writeback_tx));
+
+        let tcp_listener = tcp_listener.map(|l| crate::TcpListener::new(l, stack.nat()));
 
         (stack, tcp_listener, udp_socket, stack_tx)
     }

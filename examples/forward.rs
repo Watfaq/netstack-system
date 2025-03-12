@@ -1,12 +1,9 @@
-use std::{
-    net::{Ipv4Addr, SocketAddr},
-    sync::Arc,
-};
+use std::net::{Ipv4Addr, SocketAddr};
 
 use futures::{SinkExt, StreamExt};
-use netstack_system::{Nat, UdpSocket};
+use netstack_system::UdpSocket;
 use structopt::StructOpt;
-use tokio::net::{TcpListener, TcpSocket, TcpStream};
+use tokio::net::{TcpSocket, TcpStream};
 use tracing::{error, info, warn};
 use tun2::AbstractDevice;
 
@@ -99,7 +96,6 @@ async fn main_exec(opt: Opt) {
         .inet4_addr(addr)
         .build()
         .await;
-    let nat = stack.nat();
     let listener = listener.unwrap();
     let udp_socket = udp_socket.unwrap();
 
@@ -117,7 +113,7 @@ async fn main_exec(opt: Opt) {
     futs.push(tokio_spawn!({
         let interface = opt.interface.clone();
         async move {
-            handle_inbound_stream(nat, listener, interface).await;
+            handle_inbound_stream(listener, interface).await;
         }
     }));
     futs.push(tokio_spawn!({
@@ -137,25 +133,19 @@ async fn main_exec(opt: Opt) {
 }
 
 /// simply forward tcp stream
-async fn handle_inbound_stream(nat: Arc<Nat>, listener: TcpListener, interface: String) {
-    while let Ok((mut stream, _addr)) = listener.accept().await {
+async fn handle_inbound_stream(listener: netstack_system::TcpListener, interface: String) {
+    while let Ok((mut stream, target)) = listener.accept().await {
         let interface: String = interface.clone();
-        let nat = nat.clone();
+        // let nat = nat.clone();
         tokio::spawn(async move {
             let remote = stream.peer_addr().unwrap();
             let local = stream.local_addr().unwrap();
-            info!("new tcp connection: {:?} => {:?}", remote, local);
-            let nat_port = remote.port();
-            let nat_session = match nat.look_back(nat_port).await {
-                Some(session) => session,
-                None => {
-                    warn!("session not found, allocated port: {:?}", remote.port());
-                    return;
-                }
-            };
-            let actual_remote = (nat_session.dst, nat_session.dport);
+            info!(
+                "new tcp connection: {:?} => {:?}, actual remote: {}",
+                remote, local, target
+            );
 
-            match new_tcp_stream(actual_remote.into(), &interface).await {
+            match new_tcp_stream(target.into(), &interface).await {
                 Ok(mut remote_stream) => {
                     // pipe between two tcp stream
                     match tokio::io::copy_bidirectional(&mut stream, &mut remote_stream).await {
