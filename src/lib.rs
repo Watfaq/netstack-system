@@ -12,7 +12,7 @@ pub use nat::*;
 pub use udp::UdpSocket;
 pub type Result<T> = std::result::Result<T, StackError>;
 
-use futures::Sink;
+use futures::{Sink, SinkExt};
 use smoltcp::wire::{IpProtocol, Ipv4Packet, Ipv6Packet, TcpPacket};
 use std::{
     net::{IpAddr, Ipv4Addr},
@@ -20,7 +20,6 @@ use std::{
 };
 use tokio::{
     net::TcpListener,
-    select,
     sync::mpsc::{Receiver, Sender, channel},
     task::JoinHandle,
 };
@@ -31,7 +30,6 @@ pub struct StackBuilder {
     pub stack_buffer_size: usize,
     pub udp_buffer_size: usize,
     pub inet4_server_addr: Ipv4Addr,
-    pub tcp4_port: u16,
 }
 
 impl StackBuilder {
@@ -42,7 +40,6 @@ impl StackBuilder {
             stack_buffer_size: 1024,
             udp_buffer_size: 1024,
             inet4_server_addr: Ipv4Addr::new(192, 168, 1, 1),
-            tcp4_port: 8964,
         }
     }
 
@@ -71,11 +68,6 @@ impl StackBuilder {
         self
     }
 
-    pub fn port(mut self, port: u16) -> Self {
-        self.tcp4_port = port;
-        self
-    }
-
     pub async fn build(
         self,
     ) -> (
@@ -94,22 +86,25 @@ impl StackBuilder {
             (None, None)
         };
 
+        let tcp_listener = if self.enable_tcp {
+            TcpListener::bind((self.inet4_server_addr, 0)).await.ok()
+        } else {
+            None
+        };
+
+        let port = tcp_listener
+            .as_ref()
+            .map(|l| l.local_addr().unwrap().port())
+            .unwrap_or(0);
+
         let stack = SystemStack::new(
             self.inet4_server_addr,
-            self.tcp4_port,
+            port,
             stack_rx,
             udp_tx,
             udp_writeback_rx,
         )
         .await;
-
-        let tcp_listener = if self.enable_tcp {
-            TcpListener::bind((self.inet4_server_addr, self.tcp4_port))
-                .await
-                .ok()
-        } else {
-            None
-        };
 
         let udp_socket = udp_rx.map(|rx| UdpSocket::new(rx, udp_writeback_tx));
 
@@ -126,10 +121,13 @@ pub struct SystemStack {
     /// should under the same subnet of inet4_server_addr
     /// normally, we take it as the next addr of inet4_server_addr
     inet4_client_addr: Ipv4Addr,
-    // nat table
+    /// nat table, can be shared
     tcp_nat: Arc<Nat>,
+    /// data receiver from tun
     data_rx: Option<Receiver<Vec<u8>>>,
+    /// udp socket data receiver, should be written back to tun sink
     udp_writeback_rx: Option<Receiver<Vec<u8>>>,
+    /// udp socket data sender
     udp_tx: Option<Sender<Vec<u8>>>,
 }
 
@@ -158,22 +156,21 @@ impl SystemStack {
 
     pub fn process_loop<W: Sink<Vec<u8>> + Send + Sync + Unpin + 'static>(
         mut self,
-        mut writer: W,
+        mut tun_sink: W,
     ) -> JoinHandle<()>
     where
         W::Error: std::fmt::Debug,
     {
         let mut rx = self.data_rx.take().unwrap();
         let mut udp_writeback_rx = self.udp_writeback_rx.take().unwrap();
-        use futures::SinkExt;
         tokio::spawn(async move {
             loop {
-                select! {
+                tokio::select! {
                     buf = rx.recv() => {
                         if let Some(mut buf) = buf {
                             match self.process_ip(&mut buf).await {
                                 Ok(true) => {
-                                    if let Err(e) = writer.send(buf).await {
+                                    if let Err(e) = tun_sink.send(buf).await {
                                         tracing::error!("send error: {:?}", e);
                                     }
                                 }
@@ -189,7 +186,7 @@ impl SystemStack {
                     },
                     buf = udp_writeback_rx.recv() => {
                         if let Some(buf) = buf {
-                            if let Err(e) = writer.send(buf).await {
+                            if let Err(e) = tun_sink.send(buf).await {
                                 tracing::error!("send error: {:?}", e);
                             }
                         }

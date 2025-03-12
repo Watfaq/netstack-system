@@ -97,7 +97,6 @@ async fn main_exec(opt: Opt) {
 
     let (stack, listener, udp_socket, stack_tx) = netstack_system::StackBuilder::new()
         .inet4_addr(addr)
-        .port(10003)
         .build()
         .await;
     let nat = stack.nat();
