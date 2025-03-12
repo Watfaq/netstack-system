@@ -1,0 +1,22 @@
+[package]
+name = "netstack-system"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "time"] }
+smoltcp = "0.12.0"
+byteorder = "1.5.0"
+thiserror = "2.0"
+tracing = "0.1.41"
+futures = "0.3.31"
+tokio-util = "0.7.13"
+etherparse = "0.17.0"
+
+[dev-dependencies]
+anyhow = "1"
+structopt = "0.3.26"
+tun2 = { version = "4.0.0", features = ["async"] }
+tracing-subscriber = "0.3.19"
+socket2-ext = "0.1.1"
+socket2 = "0.5.8"
