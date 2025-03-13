@@ -140,6 +140,7 @@ impl SystemStackInner {
                 ipv4.set_dst_addr(new_dst.into());
                 ipv4.update_csum(src.as_octets(), new_src.as_octets());
                 ipv4.update_csum(dst.as_octets(), new_dst.as_octets());
+                debug_assert!(ipv4.verify_checksum());
                 return Ok(true);
             }
             IpProtocol::Udp => return self.process_udp(buf),
@@ -231,6 +232,7 @@ impl SystemStackInner {
                     new_dst,
                     new_dport
                 );
+                debug_assert!(tcp.verify_checksum(&new_src.into(), &new_dst.into()));
                 return Ok((new_src, new_dst));
             } else {
                 // dnat
@@ -264,6 +266,7 @@ impl SystemStackInner {
                     new_dst,
                     new_dport
                 );
+                debug_assert!(tcp.verify_checksum(&new_src.into(), &new_dst.into()));
                 return Ok((new_src, new_dst));
             }
         }
