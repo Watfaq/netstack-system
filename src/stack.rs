@@ -1,13 +1,10 @@
-use futures::{Sink, SinkExt};
+use futures::Stream;
 use smoltcp::wire::{IpProtocol, Ipv4Packet, Ipv6Packet, TcpPacket};
 use std::{
     net::{IpAddr, Ipv4Addr},
     sync::Arc,
 };
-use tokio::{
-    sync::mpsc::{Receiver, Sender},
-    task::JoinHandle,
-};
+use tokio::sync::mpsc::{Receiver, Sender};
 
 use crate::{Nat, Result, checksum::UpdateCsum};
 
@@ -54,15 +51,8 @@ impl SystemStackInner {
         stack
     }
 
-    // TODO: impl Stream for SystemStack to avoid the ugly loop
-    pub fn process_loop<W: Sink<Vec<u8>> + Send + Sync + Unpin + 'static>(
-        mut self,
-        mut tun_sink: W,
-    ) -> JoinHandle<()>
-    where
-        W::Error: std::fmt::Debug,
-    {
-        tokio::spawn(async move {
+    pub fn stream(mut self) -> impl Stream<Item = Vec<u8>> {
+        async_stream::stream! {
             loop {
                 tokio::select! {
                     Some(buf) = async {
@@ -74,9 +64,7 @@ impl SystemStackInner {
                         if let Some(mut buf) = buf {
                             match self.process_ip(&mut buf).await {
                                 Ok(true) => {
-                                    if let Err(e) = tun_sink.send(buf).await {
-                                        tracing::error!("send error: {:?}", e);
-                                    }
+                                    yield buf;
                                 }
                                 Ok(false) => {
                                     continue;
@@ -95,14 +83,12 @@ impl SystemStackInner {
                         }
                      } => {
                         if let Some(buf) = buf {
-                            if let Err(e) = tun_sink.send(buf).await {
-                                tracing::error!("send error: {:?}", e);
-                            }
+                            yield buf;
                         }
                     }
                 }
             }
-        })
+        }
     }
 
     /// return if the packet should be written back to tun

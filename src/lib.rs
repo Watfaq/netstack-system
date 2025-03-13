@@ -15,12 +15,9 @@ pub use tcp::TcpListener;
 pub use udp::UdpSocket;
 pub type Result<T> = std::result::Result<T, StackError>;
 
-use futures::Sink;
+use futures::Stream;
 use std::{net::Ipv4Addr, sync::Arc};
-use tokio::{
-    sync::mpsc::{Receiver, Sender, channel},
-    task::JoinHandle,
-};
+use tokio::sync::mpsc::{Receiver, Sender, channel};
 
 pub struct StackBuilder {
     pub enable_tcp: bool,
@@ -163,14 +160,8 @@ impl SystemStack {
         Self { inner }
     }
 
-    pub fn process_loop<W: Sink<Vec<u8>> + Send + Sync + Unpin + 'static>(
-        self,
-        tun_sink: W,
-    ) -> JoinHandle<()>
-    where
-        W::Error: std::fmt::Debug,
-    {
-        self.inner.process_loop(tun_sink)
+    pub fn stream(self) -> impl Stream<Item = Vec<u8>> {
+        self.inner.stream()
     }
 }
 
