@@ -20,7 +20,7 @@ struct Opt {
     name: String,
 
     /// Tracing subscriber log level.
-    #[structopt(long = "log-level", default_value = "debug")]
+    #[structopt(long = "log-level", default_value = "trace")]
     log_level: tracing::Level,
 
     /// Tokio current-thread runtime, default to multi-thread.
