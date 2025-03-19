@@ -22,6 +22,7 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
 pub struct StackBuilder {
     pub enable_tcp: bool,
     pub enable_udp: bool,
+    pub enable_icmp: bool,
     pub stack_buffer_size: usize,
     pub udp_buffer_size: usize,
     pub inet4_server_addr: Ipv4Addr,
@@ -32,6 +33,7 @@ impl StackBuilder {
         Self {
             enable_tcp: true,
             enable_udp: true,
+            enable_icmp: true,
             stack_buffer_size: 1024,
             udp_buffer_size: 1024,
             inet4_server_addr: Ipv4Addr::new(192, 168, 1, 1),
@@ -119,6 +121,7 @@ impl StackBuilder {
             udp_tx,
             udp_writeback_rx,
             nat,
+            self.enable_icmp,
         )
         .await;
 
@@ -143,6 +146,7 @@ impl SystemStack {
         udp_tx: Option<Sender<Vec<u8>>>,
         udp_rx: Option<Receiver<Vec<u8>>>,
         tcp_nat: Option<Arc<Nat>>,
+        handle_icmp: bool,
     ) -> Self {
         let mut octo = inet4_server_addr.octets();
         octo[3] += 1;
@@ -155,6 +159,7 @@ impl SystemStack {
             udp_tx,
             udp_rx,
             tcp_nat,
+            handle_icmp,
         )
         .await;
         Self { inner }

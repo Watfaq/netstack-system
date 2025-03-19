@@ -24,6 +24,7 @@ pub struct SystemStackInner {
     udp_rx: Option<Receiver<Vec<u8>>>,
     /// udp socket data sender
     udp_tx: Option<Sender<Vec<u8>>>,
+    enable_icmp: bool,
 }
 
 impl SystemStackInner {
@@ -35,6 +36,7 @@ impl SystemStackInner {
         udp_tx: Option<Sender<Vec<u8>>>,
         udp_rx: Option<Receiver<Vec<u8>>>,
         tcp_nat: Option<Arc<Nat>>,
+        handle_icmp: bool,
     ) -> Self {
         let mut octo = inet4_server_addr.octets();
         octo[3] += 1;
@@ -46,6 +48,7 @@ impl SystemStackInner {
             udp_rx,
             udp_tx,
             tcp_nat,
+            enable_icmp: handle_icmp,
         };
 
         stack
@@ -130,6 +133,17 @@ impl SystemStackInner {
                 return Ok(true);
             }
             IpProtocol::Udp => return self.process_udp(buf),
+            IpProtocol::Icmp => {
+                if !self.enable_icmp {
+                    return Ok(false);
+                }
+                let src = ipv4.src_addr();
+                let dst = ipv4.dst_addr();
+                ipv4.set_src_addr(dst);
+                ipv4.set_dst_addr(src);
+                ipv4.fill_checksum();
+                return self.process_icmp(ipv4.payload_mut());
+            }
             other => return Err(crate::StackError::Protocol(other)),
         }
     }
@@ -159,6 +173,16 @@ impl SystemStackInner {
                 return Ok(true);
             }
             IpProtocol::Udp => return self.process_udp(buf),
+            IpProtocol::Icmpv6 => {
+                if !self.enable_icmp {
+                    return Ok(false);
+                }
+                let src = ipv6.src_addr();
+                let dst = ipv6.dst_addr();
+                ipv6.set_src_addr(dst);
+                ipv6.set_dst_addr(src);
+                return self.process_icmp(ipv6.payload_mut());
+            }
             other => return Err(crate::StackError::Protocol(other)),
         }
     }
@@ -178,7 +202,7 @@ impl SystemStackInner {
                 let session = match session {
                     Some(session) => session,
                     None => {
-                        tracing::trace!(
+                        tracing::debug!(
                             "{}:{} => {}:{}, flags: ack: {}, fin:{}, syn:{}, rst:{}",
                             src,
                             tcp.src_port(),
@@ -266,5 +290,13 @@ impl SystemStackInner {
             }
         });
         Ok(false)
+    }
+
+    fn process_icmp(&self, buf: &mut [u8]) -> Result<bool> {
+        let mut icmp = smoltcp::wire::Icmpv4Packet::new_checked(&mut *buf)?;
+        icmp.set_msg_type(smoltcp::wire::Icmpv4Message::EchoReply);
+        icmp.set_msg_code(0);
+        icmp.fill_checksum();
+        Ok(true)
     }
 }
