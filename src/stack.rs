@@ -38,8 +38,6 @@ impl SystemStackInner {
         tcp_nat: Option<Arc<Nat>>,
         handle_icmp: bool,
     ) -> Self {
-        let mut octo = inet4_server_addr.octets();
-        octo[3] += 1;
         let stack = Self {
             inet4_server_addr,
             tcp_port,
@@ -58,6 +56,7 @@ impl SystemStackInner {
         async_stream::stream! {
             loop {
                 tokio::select! {
+                    biased;  // Process branches in order to reduce reordering
                     Some(buf) = async {
                         match self.data_rx.as_mut() {
                             Some(rx) => Some(rx.recv().await),

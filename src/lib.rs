@@ -34,8 +34,8 @@ impl StackBuilder {
             enable_tcp: true,
             enable_udp: true,
             enable_icmp: true,
-            stack_buffer_size: 1024,
-            udp_buffer_size: 1024,
+            stack_buffer_size: 8196,
+            udp_buffer_size: 8196,
             inet4_server_addr: Ipv4Addr::new(192, 168, 1, 1),
         }
     }

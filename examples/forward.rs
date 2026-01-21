@@ -1,4 +1,4 @@
-use std::net::{Ipv4Addr, SocketAddr};
+use std::{io, net::{Ipv4Addr, SocketAddr}};
 
 use futures::{SinkExt, StreamExt};
 use netstack_system::UdpSocket;
@@ -6,6 +6,10 @@ use structopt::StructOpt;
 use tokio::net::{TcpSocket, TcpStream};
 use tracing::{error, info, warn};
 use tun2::AbstractDevice;
+
+use socket2::SockRef;
+
+const TCP_BUFFER_SIZE: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "forward", about = "Simply forward tun tcp/udp traffic.")]
@@ -93,6 +97,8 @@ async fn main_exec(opt: Opt) {
     let mut futs = vec![];
 
     let (stack, listener, udp_socket, stack_tx) = netstack_system::StackBuilder::new()
+        .stack_buffer_size(64 * 1024)
+        .udp_buffer_size(64 * 1024)
         .inet4_addr(addr)
         .build()
         .await;
@@ -140,6 +146,9 @@ async fn main_exec(opt: Opt) {
 /// simply forward tcp stream
 async fn handle_inbound_stream(listener: netstack_system::TcpListener, interface: String) {
     while let Ok((mut stream, target)) = listener.accept().await {
+        if let Err(e) = tune_tcp_stream(&stream) {
+            warn!("failed to tune inbound stream buffers: {:?}", e);
+        }
         let interface: String = interface.clone();
         // let nat = nat.clone();
         tokio::spawn(async move {
@@ -152,6 +161,9 @@ async fn handle_inbound_stream(listener: netstack_system::TcpListener, interface
 
             match new_tcp_stream(target.into(), &interface).await {
                 Ok(mut remote_stream) => {
+                    if let Err(e) = tune_tcp_stream(&remote_stream) {
+                        warn!("failed to tune outbound stream buffers: {:?}", e);
+                    }
                     // pipe between two tcp stream
                     match tokio::io::copy_bidirectional(&mut stream, &mut remote_stream).await {
                         Ok(_) => {}
@@ -190,7 +202,7 @@ async fn handle_inbound_datagram(udp_socket: UdpSocket, interface: String) {
                     // pipe between two udp sockets
                     let _ = remote_socket.send(&data).await;
                     loop {
-                        let mut buf = vec![0; 1024];
+                        let mut buf = vec![0; 8196];
                         match remote_socket.recv_from(&mut buf).await {
                             Ok((len, _)) => {
                                 let _ = tx.send((buf[..len].to_vec(), local, remote));
@@ -218,6 +230,8 @@ async fn new_tcp_stream<'a>(addr: SocketAddr, iface: &str) -> std::io::Result<Tc
     use socket2_ext::{AddressBinding, BindDeviceOption};
     let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     socket.bind_to_device(BindDeviceOption::v4(iface))?;
+    socket.set_recv_buffer_size(TCP_BUFFER_SIZE)?;
+    socket.set_send_buffer_size(TCP_BUFFER_SIZE)?;
     socket.set_keepalive(true)?;
     socket.set_nodelay(true)?;
     socket.set_nonblocking(true)?;
@@ -240,4 +254,11 @@ async fn new_udp_packet(addr: SocketAddr, iface: &str) -> std::io::Result<tokio:
         socket.connect(addr).await?;
     }
     socket
+}
+
+fn tune_tcp_stream(stream: &TcpStream) -> io::Result<()> {
+    let socket = SockRef::from(stream);
+    socket.set_recv_buffer_size(TCP_BUFFER_SIZE)?;
+    socket.set_send_buffer_size(TCP_BUFFER_SIZE)?;
+    Ok(())
 }
